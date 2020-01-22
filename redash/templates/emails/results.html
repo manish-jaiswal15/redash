@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <style>
+  table {
+    font-family: arial, sans-serif;
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  td, th {
+    border: 1px solid gray;
+    text-align: left;
+    padding: 8px;
+  }
+	
+  thead {
+    background-color: #4285f1;
+    color: white;
+  }
+
+  tbody tr:nth-child(even) {
+    background-color: #dddddd;
+  }
+  </style>
+</head>
+<body>
+		<table>
+			<thead>
+				<tr>
+					{% for col in context.get('columns') %}
+						<th>{{ col.get('name') }}</th>
+					{% endfor %}
+				</tr>
+			</thead>
+			<tbody>
+				{% for row in context.get('rows') %}
+					<tr>
+						{% for col in context.get('columns') %}
+							<td>{{ row.get(col.get('name')) }}</td>
+						{% endfor %}
+					</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+</body>
+</html>	

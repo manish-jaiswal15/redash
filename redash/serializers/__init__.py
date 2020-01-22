@@ -103,6 +103,8 @@ def serialize_query(query, with_stats=False, with_visualizations=False, with_use
         'version': query.version,
         'tags': query.tags or [],
         'is_safe': query.parameterized.is_safe,
+        'notifications': [serialize_subscriptions(subscription)
+                            for subscription in query.subscriptions]
     }
 
     if with_user:
@@ -227,4 +229,19 @@ def serialize_dashboard(obj, with_widgets=False, user=None, with_favorite_state=
     if with_favorite_state:
         d['is_favorite'] = models.Favorite.is_favorite(current_user.id, obj)
 
+    return d
+
+
+def serialize_subscriptions(obj):
+    d = {
+        'id': obj.id,
+        'enabled': True,
+        'handler': obj.handler,
+        'query': obj.query_rel.id,
+        'event' : obj.event,
+        'options': obj.options,
+    }
+    d[obj.handler] = getattr(obj, 'options', {}) or {}
+    # will remove this post updates
+    d[obj.handler].update({"recipients": obj.recipients})
     return d

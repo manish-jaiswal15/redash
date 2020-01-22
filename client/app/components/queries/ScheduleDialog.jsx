@@ -5,12 +5,13 @@ import DatePicker from 'antd/lib/date-picker';
 import TimePicker from 'antd/lib/time-picker';
 import Select from 'antd/lib/select';
 import Radio from 'antd/lib/radio';
+import Input from 'antd/lib/input';
+import { Checkbox } from 'antd';
 import { capitalize, clone, isEqual, omitBy, isNil } from 'lodash';
 import moment from 'moment';
 import { secondsToInterval, durationHumanize, pluralize, IntervalEnum, localizeTime } from '@/filters';
 import { wrap as wrapDialog, DialogPropType } from '@/components/DialogWrapper';
 import { RefreshScheduleType, RefreshScheduleDefault, Moment } from '../proptypes';
-
 import './ScheduleDialog.css';
 
 const WEEKDAYS_SHORT = moment.weekdaysShort();
@@ -18,16 +19,13 @@ const WEEKDAYS_FULL = moment.weekdays();
 const DATE_FORMAT = 'YYYY-MM-DD';
 const HOUR_FORMAT = 'HH:mm';
 const { Option, OptGroup } = Select;
-
 export function TimeEditor(props) {
   const [time, setTime] = useState(props.defaultValue);
   const showUtc = time && !time.isUTC();
-
   function onChange(newTime) {
     setTime(newTime);
     props.onChange(newTime);
   }
-
   return (
     <React.Fragment>
       <TimePicker
@@ -39,31 +37,30 @@ export function TimeEditor(props) {
       />
       {showUtc && (
         <span className="utc" data-testid="utc">
-          ({ moment.utc(time).format(HOUR_FORMAT) } UTC)
+          ({moment.utc(time).format(HOUR_FORMAT)} UTC)
         </span>
       )}
     </React.Fragment>
   );
 }
-
 TimeEditor.propTypes = {
   defaultValue: Moment,
   onChange: PropTypes.func.isRequired,
 };
-
 TimeEditor.defaultProps = {
   defaultValue: null,
 };
-
 class ScheduleDialog extends React.Component {
   static propTypes = {
     schedule: RefreshScheduleType,
     refreshOptions: PropTypes.arrayOf(PropTypes.number).isRequired,
     dialog: DialogPropType.isRequired,
+    notifications: PropTypes.array,
   };
 
   static defaultProps = {
     schedule: RefreshScheduleDefault,
+    notifications: { enabled: false },
   };
 
   state = this.getState();
@@ -73,7 +70,7 @@ class ScheduleDialog extends React.Component {
     const { time, interval: seconds, day_of_week: day } = newSchedule;
     const { interval } = secondsToInterval(seconds);
     const [hour, minute] = time ? localizeTime(time).split(':') : [null, null];
-
+    const notifications = clone(this.props.notifications[0] || ScheduleDialog.defaultProps.notifications);
     return {
       hour,
       minute,
@@ -81,6 +78,7 @@ class ScheduleDialog extends React.Component {
       interval,
       dayOfWeek: day ? WEEKDAYS_SHORT[WEEKDAYS_FULL.indexOf(day)] : null,
       newSchedule,
+      notifications,
     };
   }
 
@@ -95,9 +93,7 @@ class ScheduleDialog extends React.Component {
       }
       ret[interval].push([count, seconds]);
     });
-
     Object.defineProperty(this, 'intervals', { value: ret }); // memoize
-
     return ret;
   }
 
@@ -115,10 +111,10 @@ class ScheduleDialog extends React.Component {
     };
   };
 
+
   setInterval = (newSeconds) => {
     const { newSchedule } = this.state;
     const { interval: newInterval } = secondsToInterval(newSeconds);
-
     // resets to defaults
     if (newInterval === IntervalEnum.NEVER) {
       newSchedule.until = null;
@@ -142,11 +138,8 @@ class ScheduleDialog extends React.Component {
     if (newInterval === IntervalEnum.WEEKS && !this.state.dayOfWeek) {
       newSchedule.day_of_week = WEEKDAYS_FULL[0];
     }
-
     newSchedule.interval = newSeconds;
-
     const [hour, minute] = newSchedule.time ? localizeTime(newSchedule.time).split(':') : [null, null];
-
     this.setState({
       interval: newInterval,
       seconds: newSeconds,
@@ -154,8 +147,47 @@ class ScheduleDialog extends React.Component {
       minute,
       dayOfWeek: newSchedule.day_of_week ? WEEKDAYS_SHORT[WEEKDAYS_FULL.indexOf(newSchedule.day_of_week)] : null,
     });
-
     this.newSchedule = newSchedule;
+  };
+
+  setSubjectTemplate = (e) => {
+    const notifications = { ...this.state.notifications };
+    if (!notifications.email) {
+      notifications.email = {};
+    }
+    notifications.email.subject_template = e.target.value;
+    this.setState({ notifications });
+  }
+
+  getSubjectTemplate = () => {
+    const options = this.state.notifications.options;
+    let value = 'Execution results for query - {query_name}';
+    if (options && options.subject_template) {
+      value = options.subject_template;
+    }
+    return value;
+  }
+
+  getEmail() {
+    const emailParams = this.state.notifications.email;
+    let recipients = '';
+    if (emailParams && emailParams.recipients) {
+      recipients = emailParams.recipients;
+    }
+    return recipients;
+  }
+
+
+  showNotifyDialog = (e) => {
+    const notifications = { enabled: e.target.checked, handler: 'email', event: 'onExecution', email: { recipients: '' } };
+    this.setState({ notifications });
+  }
+
+  setEmailRecipient = (e) => {
+    const recipients = e.target.value;
+    const notifications = { ...this.state.notifications };
+    notifications.email.recipients = recipients;
+    this.setState({ notifications });
   };
 
   setScheduleUntil = (_, date) => {
@@ -180,11 +212,13 @@ class ScheduleDialog extends React.Component {
     const hasChanged = () => {
       const newCompact = omitBy(newSchedule, isNil);
       const oldCompact = omitBy(this.props.schedule, isNil);
-      return !isEqual(newCompact, oldCompact);
+      // const newNotification = omitBy(this.state.notifications, isNil);
+      // will change after we find a solution to find changed notification
+      return (!isEqual(newCompact, oldCompact) || true);
     };
-
     // save if changed
     if (hasChanged()) {
+      newSchedule.notifications = this.state.notifications;
       if (newSchedule.interval) {
         this.props.dialog.close(clone(newSchedule));
       } else {
@@ -202,8 +236,8 @@ class ScheduleDialog extends React.Component {
       hour,
       seconds,
       newSchedule: { until },
+      notifications: { enabled },
     } = this.state;
-
     return (
       <Modal {...dialog.props} title="Refresh Schedule" className="schedule" onOk={() => this.save()}>
         <div className="schedule-component">
@@ -271,9 +305,41 @@ class ScheduleDialog extends React.Component {
             </div>
           </div>
         ) : null}
+        {interval !== IntervalEnum.NEVER ? (
+          <div className="schedule-component">
+            <div className="email" data-testid="email">
+              <Checkbox
+                defaultChecked={this.state.notifications.enabled}
+                value={this.state.notifications.enabled}
+                onChange={this.showNotifyDialog}
+              >
+                Notify results on Email
+              </Checkbox>
+              {enabled ? (
+                <div className="schedule-input">
+                  <Input
+                    defaultValue={this.getEmail()}
+                    onChange={this.setEmailRecipient}
+                    placeholder="Enter recipients (comma separated)"
+                    allowClear={false}
+                  />
+                </div>
+              ) : null}
+              {enabled ? (
+                <div className="schedule-input">
+                  <Input
+                    value={this.getSubjectTemplate()}
+                    placeholder="Subject template for mail"
+                    onChange={this.setSubjectTemplate}
+                    disabled
+                  />
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </Modal>
     );
   }
 }
-
 export default wrapDialog(ScheduleDialog);

@@ -484,6 +484,7 @@ function QueryViewCtrl(
       return;
     }
     ScheduleDialog.showModal({
+      notifications: $scope.query.notifications.filter(e => e.event === 'onExecution'),
       schedule: $scope.query.schedule,
       refreshOptions: $scope.refreshOptions,
     }).result.then((schedule) => {

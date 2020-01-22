@@ -235,6 +235,7 @@ class QueryListResource(BaseQueryListResource):
         query_def['data_source'] = data_source
         query_def['org'] = self.current_org
         query_def['is_draft'] = True
+
         query = models.Query.create(**query_def)
         models.db.session.add(query)
         models.db.session.commit()
@@ -319,6 +320,7 @@ class QueryResource(BaseResource):
         :<json string name:
         :<json string description:
         :<json string schedule: Schedule interval, in seconds, for repeated execution of this query
+        :<json notifications: notifications info(if user has subscribed)
         :<json object options: Query options
 
         Responds with the updated :ref:`query <query-response-label>` object.
@@ -339,6 +341,22 @@ class QueryResource(BaseResource):
             query_def['tags'] = filter(None, query_def['tags'])
 
         query_def['last_modified_by'] = self.current_user
+        query_def['org'] = query.org
+        query_def['user'] = query.user
+
+        schedule = query_def.get('schedule', {})
+        if isinstance(schedule, dict):
+            # check if subscribed for notifications
+            notifications = schedule.pop('notifications', {})
+            if isinstance(notifications, dict):
+                if notifications.get('enabled'):
+                    # user has opted for subscription add or update
+                    event_type = notifications.get('event', "onExecution")  #  onExecution is only supported for now
+                    query = models.Query.registerExecutionSubscription(notifications, query)
+                else:
+                    # user might want to delete any subscriptions
+                    query.subscriptions = []
+
         query_def['changed_by'] = self.current_user
         # SQLAlchemy handles the case where a concurrent transaction beats us
         # to the update. But we still have to make sure that we're not starting

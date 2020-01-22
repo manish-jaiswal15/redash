@@ -16,6 +16,8 @@ import ItemsTable, { Columns } from '@/components/items-list/components/ItemsTab
 
 import Layout from '@/components/layouts/ContentWithSidebar';
 
+import Tooltip from 'antd/lib/tooltip';
+
 import { Query } from '@/services/query';
 import { currentUser } from '@/services/auth';
 import { routesToAngularRoutes } from '@/lib/utils';
@@ -60,7 +62,7 @@ class QueriesList extends React.Component {
     Columns.favorites({ className: 'p-r-0' }),
     Columns.custom.sortable((text, item) => (
       <React.Fragment>
-        <a className="table-main-title" href={'queries/' + item.id}>{ item.name }</a>
+        <a className="table-main-title" href={'queries/' + item.id}>{item.name}</a>
         <QueryTagsControl
           className="d-block"
           tags={item.tags}
@@ -80,6 +82,9 @@ class QueriesList extends React.Component {
     Columns.custom.sortable(
       (text, item) => <SchedulePhrase schedule={item.schedule} isNew={item.isNew()} />,
       { title: 'Update Schedule', field: 'schedule' },
+    ),
+    Columns.custom.sortable(
+      (text, item) => <span>{item.notifications[0] && item.notifications[0].enabled ? <Tooltip title={item.notifications[0].email.recipients}>Enabled</Tooltip> : 'Disabled'}</span>, { title: 'Notify Results', field: 'notifications' },
     ),
   ];
 

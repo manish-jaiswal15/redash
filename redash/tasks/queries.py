@@ -11,6 +11,7 @@ from redash import models, redis_connection, settings, statsd_client
 from redash.models.parameterized_query import InvalidParameterError, QueryDetachedFromDataSourceError
 from redash.query_runner import InterruptException
 from redash.tasks.alerts import check_alerts_for_query
+from redash.tasks.notify import send_execution_results_to_subscribers
 from redash.tasks.failure_report import notify_of_failure
 from redash.utils import gen_query_hash, json_dumps, utcnow, mustache_render
 from redash.worker import celery
@@ -393,6 +394,9 @@ class QueryExecutor(object):
             self._log_progress('checking_alerts')
             for query_id in updated_query_ids:
                 check_alerts_for_query.delay(query_id)
+            if self.scheduled_query:
+                self._log_progress("Sending execution results to subscribers")
+                send_execution_results_to_subscribers.delay(query_id)
             self._log_progress('finished')
 
             result = query_result.id

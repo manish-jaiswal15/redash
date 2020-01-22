@@ -33,6 +33,7 @@ from .mixins import BelongsToOrgMixin, TimestampMixin
 from .organizations import Organization
 from .types import EncryptedConfiguration, Configuration, MutableDict, MutableList, PseudoJSON
 from .users import (AccessPermission, AnonymousUser, ApiUser, Group, User)  # noqa
+from flask import render_template as renderer
 
 logger = logging.getLogger(__name__)
 
@@ -388,6 +389,8 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
     is_archived = Column(db.Boolean, default=False, index=True)
     is_draft = Column(db.Boolean, default=True, index=True)
     schedule = Column(MutableDict.as_mutable(PseudoJSON), nullable=True)
+    # subscribe to scheduled runs and send notification on every scheduled run
+    subscriptions = db.relationship("Notification", cascade="all, delete-orphan")
     schedule_failures = Column(db.Integer, default=0)
     visualizations = db.relationship("Visualization", cascade="all, delete-orphan")
     options = Column(MutableDict.as_mutable(PseudoJSON), default={})
@@ -436,6 +439,45 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
                                      type="TABLE",
                                      options="{}"))
         return query
+
+    @classmethod
+    def handle_subscriptions(cls, class_params, notify_type, notify_options):
+        # not using type for now
+        query = cls(**class_params)
+        db.session.add(Notification(
+            query_rel=query,
+            options={},
+            recipients=notify_options['recipients']
+        ))
+        return query
+
+    @classmethod
+    def registerExecutionSubscription(cls, notification_conf, query_obj):
+        # will always create new subscription for now as only one type of support is present
+        # and that must be unique
+        if query_obj.subscriptions:
+            query_obj.subscriptions = []
+        handler = notification_conf.get('handler', "email")
+        handler_opts = notification_conf.get(handler)
+
+        if not handler_opts:
+            raise Exception("Please specify handler options")
+
+        recipients = handler_opts['recipients']
+        recipients = Notification.sanitize_recipients(recipients)
+
+        subscription = Notification(
+            query_rel=query_obj,
+            options=handler_opts,
+            event="onExecution",
+            handler=handler,
+            recipients=recipients
+        )
+
+        # add to session. will be committed on next flush
+        db.session.add(subscription)
+        query_obj.subscriptions.append(subscription)
+        return query_obj
 
     @classmethod
     def all_queries(cls, group_ids, user_id=None, include_drafts=False, include_archived=False):
@@ -532,12 +574,12 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
             .order_by(Query.id)
         )
         return filter(
-                lambda x:
-                x.schedule["until"] is not None and pytz.utc.localize(
-                    datetime.datetime.strptime(x.schedule['until'], '%Y-%m-%d')
-                ) <= now,
-                queries
-                )
+            lambda x:
+            x.schedule["until"] is not None and pytz.utc.localize(
+                datetime.datetime.strptime(x.schedule['until'], '%Y-%m-%d')
+            ) <= now,
+            queries
+        )
 
     @classmethod
     def outdated_queries(cls):
@@ -703,6 +745,24 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
 
         api_keys = db.session.execute(query, {'id': self.id}).fetchall()
         return [api_key[0] for api_key in api_keys]
+    
+    def after_model_change(self, form, model, is_created):
+        """
+            Perform some actions after a model was created or updated and
+            committed to the database.
+
+            Called from create_model after successful database commit.
+
+            By default does nothing.
+
+            :param form:
+                Form used to create/update model
+            :param model:
+                Model that was created/updated
+            :param is_created:
+                True if model was created, False if model was updated
+        """
+        pass
 
 
 @listens_for(Query.query_text, 'set')
@@ -1218,6 +1278,81 @@ class QuerySnippet(TimestampMixin, db.Model, BelongsToOrgMixin):
         }
 
         return d
+
+
+@generic_repr('id', 'query_id', 'event', 'handler')
+class Notification(TimestampMixin, db.Model):
+    """ 
+        This is purely for notifying the user ONLY THROUGH MAIL.
+        Other destinations are supported with alerts only
+    """
+    id = Column(db.Integer, primary_key=True)
+    # name = Column(db.String(255))
+    query_id = Column(db.Integer, db.ForeignKey("queries.id"))
+    query_rel = db.relationship(Query, backref=backref('notification', cascade="all"))
+    event = Column(db.String(255))
+    options = Column(MutableDict.as_mutable(PseudoJSON))
+    handler = Column(db.String, default="email")
+    recipients = Column(db.Text)
+
+    __tablename__ = 'notifications'
+
+    def notify(self, mail_content, mail_options):
+            # User email subscription, so create an email destination object
+        config = self.options
+        config.update(mail_options)
+        # ensuring recipients are updated at last
+        config['addresses'] = self.recipients
+        schema = get_configuration_schema_for_destination_type('mailnotifier')
+        options = ConfigurationContainer(config, schema)
+        destination = get_destination('mailnotifier', options)
+        return destination.notify(mail_content, self.query_rel, options)
+
+    def to_dict(self):
+        d = {
+            'id': self.id,
+            'query_id': self.query_id,
+            'user': self.user.to_dict(),
+            'destination': self.destination.to_dict()
+        }
+
+        return d
+
+    @classmethod
+    def sanitize_recipients(cls, recipients):
+        recipients = recipients.strip().split(',')
+        # this will ensure that individual recipients are also stripped
+        recipients = map(str, recipients)
+        recipients = map(str.strip, recipients)
+        return ",".join(recipients)
+
+    @classmethod
+    def all(cls):
+        return (
+            cls.query
+            .options(
+                joinedload(Alert.user),
+                joinedload(Alert.query_rel),
+            )
+            .join(Query)
+            .join(
+                DataSourceGroup,
+                DataSourceGroup.data_source_id == Query.data_source_id
+            )
+        )
+
+    def render_template_with_latest_data(self):
+        data = json_loads(self.query_rel.latest_query_data.data)
+
+        if not self.template:
+            return data
+        context = {'rows': data['rows'], 'columns': data['columns']}
+        html = renderer(self.template, context=context)
+        return html
+
+    @property
+    def template(self):
+        return self.options.get('template', 'emails/results.html')
 
 
 def init_db():

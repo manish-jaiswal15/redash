@@ -7,6 +7,11 @@
   padding: 5px 0px;
 }
 
+.schedule-input {
+  padding: 8px 0px;
+  width: 380px;
+}
+
 .schedule-component > * {
   display: inline-block;
 }
