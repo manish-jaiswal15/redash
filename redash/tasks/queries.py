@@ -394,9 +394,12 @@ class QueryExecutor(object):
             self._log_progress('checking_alerts')
             for query_id in updated_query_ids:
                 check_alerts_for_query.delay(query_id)
-            if self.scheduled_query:
+            if self.scheduled_query or True:
+                print("======================================================")
                 self._log_progress("Sending execution results to subscribers")
-                send_execution_results_to_subscribers.delay(query_id)
+                for query_id in updated_query_ids:
+                    logger.info("Sending output for result - %s" %(query_id))
+                    send_execution_results_to_subscribers.delay(query_id)
             self._log_progress('finished')
 
             result = query_result.id

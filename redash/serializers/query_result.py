@@ -34,9 +34,11 @@ def _convert_datetime(value, fmt):
     return ret
 
 
-def _get_column_lists(columns):
-    date_format = _convert_format(current_org.get_setting('date_format'))
-    datetime_format = _convert_format('{} {}'.format(current_org.get_setting('date_format'), current_org.get_setting('time_format')))
+def _get_column_lists(columns, date_format=None, datetime_format=None):
+    if not date_format:
+        date_format = _convert_format(current_org.get_setting('date_format'))
+    if not datetime_format:
+        datetime_format = _convert_format('{} {}'.format(current_org.get_setting('date_format'), current_org.get_setting('time_format')))
 
     special_types = {
         TYPE_BOOLEAN: _convert_bool,
@@ -65,12 +67,12 @@ def serialize_query_result(query_result, is_api_user):
         return query_result.to_dict()
 
 
-def serialize_query_result_to_csv(query_result):
+def serialize_query_result_to_csv(query_result, date_format=None, datetime_format=None):
     s = cStringIO.StringIO()
 
     query_data = json_loads(query_result.data)
 
-    fieldnames, special_columns = _get_column_lists(query_data['columns'] or [])
+    fieldnames, special_columns = _get_column_lists(query_data['columns'] or [], date_format, datetime_format)
 
     writer = csv.DictWriter(s, extrasaction="ignore", fieldnames=fieldnames)
     writer.writer = UnicodeWriter(s)

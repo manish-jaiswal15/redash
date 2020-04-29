@@ -3,6 +3,7 @@ import calendar
 import logging
 import time
 import pytz
+import json
 
 from six import python_2_unicode_compatible, text_type
 from sqlalchemy import distinct, or_, and_, UniqueConstraint
@@ -23,7 +24,7 @@ from redash.destinations import (get_configuration_schema_for_destination_type,
 from redash.metrics import database  # noqa: F401
 from redash.query_runner import (get_configuration_schema_for_query_runner_type,
                                  get_query_runner, TYPE_BOOLEAN, TYPE_DATE, TYPE_DATETIME)
-from redash.utils import generate_token, json_dumps, json_loads, mustache_render
+from redash.utils import generate_token, json_dumps, json_loads, mustache_render, base_url
 from redash.utils.configuration import ConfigurationContainer
 from redash.models.parameterized_query import ParameterizedQuery
 
@@ -764,6 +765,9 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
         """
         pass
 
+    def get_url(self):
+        return "%s/queries/%s" %(base_url(self.org), self.id)
+
 
 @listens_for(Query.query_text, 'set')
 def gen_query_hash(target, val, oldval, initiator):
@@ -1297,16 +1301,42 @@ class Notification(TimestampMixin, db.Model):
 
     __tablename__ = 'notifications'
 
-    def notify(self, mail_content, mail_options):
-            # User email subscription, so create an email destination object
+    def notify(self):
+
+        query_result = self.query_rel.latest_query_data
+        data = json.loads(query_result.data)
+        
+        mail_options = {}
+
+        print("=========== %s ============" %(self.options))
+        print("====Send as attachment === %s" %(self.options.get('send_as_attachment', False)))
+
+        if not data['rows']:
+            logger.info("No results for query - %s | Sending mail to creator and modifier" %(self.query_rel.id))
+            mail_options['addresses'] = "%s,%s" %(self.query_rel.user.email, self.query_rel.last_modified_by.email)
+            content = "No output generated on for today's execution - %s" %(self.query_rel.get_url())
+            # override send as attachment flag
+            mail_options['send_as_attachment'] = False
+        else:
+            if self.options.get('send_as_attachment', False):
+                content = self.query_rel.latest_query_data
+            else:
+                content = self.render_template_with_latest_data(query_result)
+
+        if self.options.get('subject_template'):
+            mail_options = {"subject_template": self.options.get('subject_template')}
+
+        # User email subscription, so create an email destination object
         config = self.options
-        config.update(mail_options)
-        # ensuring recipients are updated at last
         config['addresses'] = self.recipients
+
+        # so that recipients can be updated programmatically
+        config.update(mail_options)
+
         schema = get_configuration_schema_for_destination_type('mailnotifier')
         options = ConfigurationContainer(config, schema)
         destination = get_destination('mailnotifier', options)
-        return destination.notify(mail_content, self.query_rel, options)
+        return destination.notify(content, self.query_rel, options)
 
     def to_dict(self):
         d = {
@@ -1341,12 +1371,13 @@ class Notification(TimestampMixin, db.Model):
             )
         )
 
-    def render_template_with_latest_data(self):
-        data = json_loads(self.query_rel.latest_query_data.data)
+    def render_template_with_latest_data(self, query_result):
+        data = json_loads(query_result.data)
+        # data = json_loads(self.query_rel.latest_query_data.data)
 
         if not self.template:
             return data
-        context = {'rows': data['rows'], 'columns': data['columns']}
+        context = {'rows': data['rows'], 'columns': data['columns'], 'meta': {'url': self.query_rel.get_url()}}
         html = renderer(self.template, context=context)
         return html
 

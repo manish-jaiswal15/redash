@@ -161,7 +161,7 @@ class ScheduleDialog extends React.Component {
 
   getSubjectTemplate = () => {
     const options = this.state.notifications.options;
-    let value = 'Execution results for query - {query_name}';
+    let value = 'Execution results for query - ${query_name}';  //eslint-disable-line
     if (options && options.subject_template) {
       value = options.subject_template;
     }
@@ -179,7 +179,7 @@ class ScheduleDialog extends React.Component {
 
 
   showNotifyDialog = (e) => {
-    const notifications = { enabled: e.target.checked, handler: 'email', event: 'onExecution', email: { recipients: '' } };
+    const notifications = { enabled: e.target.checked, handler: 'email', event: 'onExecution', email: { recipients: '', subject_template: this.getSubjectTemplate() } };
     this.setState({ notifications });
   }
 
@@ -328,10 +328,10 @@ class ScheduleDialog extends React.Component {
               {enabled ? (
                 <div className="schedule-input">
                   <Input
-                    value={this.getSubjectTemplate()}
+                    defaultValue={this.getSubjectTemplate()}
                     placeholder="Subject template for mail"
                     onChange={this.setSubjectTemplate}
-                    disabled
+                    value={this.state.notifications.email.subject_template}
                   />
                 </div>
               ) : null}

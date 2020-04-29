@@ -9,6 +9,7 @@ from flask_mail import Message
 from redash import mail, settings
 from redash.destinations import *
 from string import Template
+from redash.serializers import serialize_query_result, serialize_query_result_to_csv, serialize_query_result_to_xlsx
 
 
 DEFAULT_MAIL_TEMPLATE = '${query_name}'
@@ -27,6 +28,14 @@ class MailNotifier(BaseDestination):
                     "type": "string",
                     "default": DEFAULT_MAIL_TEMPLATE,
                     "title": "Subject Template"
+                },
+                "send_as_attachment": {
+                    "type": "boolean",
+                    "default": False
+                },
+                "attachment_format": {
+                    "type": "string",
+                    "default": "csv"
                 }
             },
             "required": ["addresses"]
@@ -42,6 +51,11 @@ class MailNotifier(BaseDestination):
             or a callable with output type string
             options contains additional mail settings
         """
+
+        mime_type = {
+            "csv": "text/csv",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
         recipients = [email for email in options.get('addresses', '').split(',') if email]
 
         if not recipients:
@@ -51,15 +65,25 @@ class MailNotifier(BaseDestination):
             if callable(content):
                 html = content()
             else:
-                html = html
+                html = content
             # finalize subject
             subject_template = options.get('subject_template', DEFAULT_MAIL_TEMPLATE)
             subject = Template(subject_template).safe_substitute(query_name=query_obj.name)
+
             message = Message(
                 recipients=recipients,
-                subject=subject,
-                html=html
+                subject=subject
             )
+            if options.get('send_as_attachment', False):
+                file_format = options.get('attachment_format', 'csv')
+                # override and recreate
+                content = globals()["serialize_query_result_to_%s" %(file_format)](html)
+                message.attach('output.%s' %(file_format), mime_type["%s" %(file_format)], content)
+            else:
+                message.html=html
+
+            print("Subject - %s" %(subject))
+
             mail.send(message)
         except Exception as e:
             logging.exception("Couldn't send mail due to error - %s" %(str(e)))
